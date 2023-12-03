@@ -1,0 +1,580 @@
+---
+title: "Significant predictors of heart diseases"
+author: "Double O 5: Viraj Acharya, Jacqueline Rodriguez, Raymond Xiong, Alina Yin"
+date: "11/9/2023"
+format: pdf
+execute: 
+  warning: false
+  message: false
+  echo: false
+fig-width: 6
+fig-height: 4
+fontsize: 9pt 
+editor: visual
+---
+
+```{r}
+#| label: load packages and data
+#install.packages("Stat2Data")
+library(tidyverse)
+library(tidymodels)
+library(patchwork)
+library(knitr)
+library(MASS)
+library(Stat2Data)
+library(rms)
+
+heart <- read_csv("data/heart.csv")
+```
+
+## Introduction and Data
+
+#### **Introduction**
+
+Cardiovascular diseases (CVDs) are disorders of the heart and blood vessels, and they are a critical health issue. They are the leading cause of death globally, accounting for 32% of all global deaths in 2019 ([WHO, 2021](https://www.who.int/news-room/fact-sheets/detail/cardiovascular-diseases-(cvds))), and they have also consistently ranked among the top 2 causes of death in the United States since 1975 ([Benjamin et al., 2018](https://doi.org/10.1161/cir.0000000000000558)). Furthermore, the economic toll of CVDs is substantial, with annual indirect costs of \$237 billion ([Lopez et al., 2023](https://www.ncbi.nlm.nih.gov/books/NBK535419/)). Consequently, effective solutions are urgently needed.
+
+Understanding the significant predictors of CVDs is crucial to mitigating the impact of heart diseases. It empowers individuals to take proactive steps and adopt healthier lifestyles, thereby preventing the onset of CVDs and reducing morbidity and mortality rates. Models that identify people with high risk of CVD could also be better constructed, which can lead to early intervention and adequate treatment, thus preventing premature deaths ([WHO, 2021](https://www.who.int/news-room/fact-sheets/detail/cardiovascular-diseases-(cvds))). A comprehensive understanding of the predictors also enables better resource allocation, more targeted prevention, and reduced economic and social costs.
+
+In this research project, we aim to focus on heart diseases, a subcategory of CVDs, and unravel their significant predictors, contributing to the global fight against CVDs. Our main research question is: **"What are the significant predictors of the occurrence of heart diseases?"** We hypothesize that these predictors of heart diseases include indicator variables of CVD-related symptoms like chest pain or discomfort as well as demographic variables like age and gender.
+
+#### Data description
+
+The data set is retrieved from Kaggle and combines the Cleveland, Hungarian, Switzerland, Long Beach VA, and Stalog (Heart) data set from the UC Irvine Machine Learning Repository. The data were originally collected from 918 patients between 1981 and 1987 at the Cleveland Clinic in Cleveland, OH; the Long Beach Veterans Administration Medical Center in Long Beach, CA; the Hungarian Institute of Cardiology in Budapest, Hungary; and university hospitals in Zurich and Basel, Switzerland. A more detailed description of when and how the data were originally collected is provided in the original paper [(Detrano et al.)](https://pubmed.ncbi.nlm.nih.gov/2756873/) (See full citations in Appendix 4). The data set we will use is an excerpted version, with 12 variables out of the original 76 variables. As a note, we consider all the variables in the dataset except for Cholesterol. We decide not to include Cholesterol in our modeling process and analysis because there are two many missing values for Cholesterol (172 observations, or around 18% of the observations, have missing values for Cholesterol), which may lead to low accuracy and precision in statistical analysis.
+
+The codebook for all variables' definitions can be found in [the README file](./data/README.md) for the data. The variables we'll focus on include:
+
+-   `HeartDisease`: Response variable, whether the patient has heart disease (1: Yes; 0: No)
+-   `Age`: Age of patient (numeric value in years)
+-   `Sex`: Sex of patient (M: Male; F: Female)
+-   `ChestPainType`: Chest pain type (TA: Typical Angina; ATA: Atypical Angina; NAP: Non-Anginal Pain; ASY: Asymptomatic)
+-   `RestingBP`: Resting blood pressure (numeric value in mm Hg)
+-   `FastingBS`: Whether the patient has high fasting blood sugar (1: if fasting blood sugar \> 120 mg/dL; 0: otherwise)
+-   `RestingECG`: Resting electrocardiogram results (Normal: Normal; ST: having ST-T wave abnormality; LVH: showing probable or definite left ventricular hypertrophy by Estes' criteria)
+-   `MaxHR`: Maximum heart rate achieved (numeric value in times per minute)
+-   `ExerciseAngima`: Whether the patient experiences exercise-induced angina (Y: Yes; N: No)
+-   `Oldpeak`: ST depression induced by exercise relative to rest (numeric value in mm)
+-   `ST_Slope`: Slope of the peak exercise ST segment (Up: up-sloping; Flat: flat; Down: down-sloping)
+
+#### Exploratory Data Analysis
+
+```{r transform the dataset}
+#| include = FALSE
+
+glimpse(heart)
+
+heart <- heart |>
+  mutate(HeartDisease = factor(HeartDisease),
+         FastingBS = factor(FastingBS))
+```
+
+```{r 1var-eda}
+#| fig-width: 10
+#| fig-height: 3
+p1_1 <- ggplot(heart, aes(x = HeartDisease, fill = HeartDisease)) +
+  geom_bar(show.legend = FALSE) +
+  geom_text(
+    stat='count',
+    aes(
+      label = paste(
+        after_stat(count), "\n(",
+        round(after_stat(prop) * 100, 1), "%)",
+        sep = ""),
+      group = 1),
+    vjust=1.15
+  ) +
+  ylim(c(0, 600)) +
+  labs(x = "Heart Disease Diagnosis",
+       y = "Number of Patients",
+       title = "Distribution of Heart\nDisease Diagnosis") +
+  theme_bw(base_size = 9)
+
+p1_2 <- ggplot(heart, aes(x = RestingBP)) +
+  geom_histogram(binwidth = 10) +
+  labs(x = "Resting Blood Pressure (mm Hg)",
+       y = "Count",
+       title = "Distribution of Resting\nBlood Pressure") +
+  theme_bw(base_size = 9)
+
+p1_3 <- heart |>
+  mutate( 
+    Oldpeak_binned = case_when(
+      abs(Oldpeak) == 0 ~ "0",
+      abs(Oldpeak) <= 1 ~ "(0, 1]",
+      abs(Oldpeak) <= 2 ~ "(1, 2]",
+      abs(Oldpeak) > 2 ~ "(2, 6.2]"
+    ) |>
+      fct_relevel("0", "(0, 1]", "(1, 2]", "(2, 6.2]"),
+  ) |>
+  ggplot(aes(x = Oldpeak, fill = Oldpeak_binned)) +
+  geom_histogram(breaks = seq(-2.75, 6.25, by = 0.25)) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(x = "Exercise-induced ST\ndepression (mm)",
+       y = "Count",
+       fill = "Bins",
+       title = "Distribution of Exercise-\nInduced ST Depression") +
+  theme_bw(base_size = 9)
+
+p1_1 + p1_2 + p1_3
+```
+
+For our response variable, we use "1" to denote diagnosed for heart disease and "0" to denote not diagnosed for heart disease. As shown in the bar plot, 508 patients (55.3% of all observations) are diagnosed with heart disease, and 410 patients (44.7% of all observations) are not.
+
+We determined the data cleaning steps for the predictor variables through univariate EDA results. We used mean imputation to impute the missing values (0s in the original data) for the `RestingBP` variable since the variable follows an approximately normal distribution. Moreover, we discretized the `Oldpeak` variable by their absolute values into bins of $0$, $(0,1]$, $(1,2]$, and $(2,6.2]$ (where 6.2 is the maximum absolute value). Our motivation was that the variable has a peculiar distribution, with the value 0 (which indicates that the ST segment is on the baseline) being exceptionally frequent, as shown in the histogram above, while also retaining the deviation of the ST segments from the baseline.
+
+```{r 2var-eda}
+#| fig-height: 2
+
+p2_1 <- ggplot(heart, aes(x = Sex, fill = HeartDisease)) +
+  geom_bar(position="fill") +
+  scale_y_continuous(labels = label_percent()) +
+  labs(x = "Sex",
+       y = "Percentage",
+       fill = "Heart\nDisease",
+       title = "Relationship between\nHeartDisease and Sex") +
+  theme_bw(base_size = 9)
+p2_2 <- ggplot(heart, aes(x = MaxHR, y = HeartDisease, color = HeartDisease)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_y_discrete(limits = rev) +
+  labs(x = "Maximum Heart Rate\n(beats per min)",
+       y = "Heart Disease",
+       title = "Relationship between\nHeartDisease and MaxHR") +
+  theme_bw(base_size = 9)
+
+p2_1 + p2_2
+```
+
+All potential predictors are significantly associated with heart disease occurrence. For example, there seems to be an apparent correlation between sex and heart disease diagnosis: the proportion of male patients diagnosed with heart disease (around 63.2%) is significantly higher than that for female patients (around 25.9%). Another example is maximum heart rate: the median maximum heart rate for patients diagnosed with heart disease (around 126 BPM) is significantly lower than that for patients not diagnosed with heart disease (around 150 BPM). These findings indicate that being male or having a higher heart rate might be correlated with higher chances of being diagnosed with heart disease, which motivates us to further investigate the associations between the response variable and our predictor variables when modeling.
+
+```{r 3var-eda}
+#| fig-height: 2
+
+# p3_1 <- ggplot(heart, aes(x = MaxHR, y = HeartDisease, color = HeartDisease)) +
+#   geom_boxplot(show.legend = FALSE) +
+#   scale_y_discrete(limits = rev) +
+#   facet_grid(~ST_Slope) +
+#   labs(x = "Maximum Heart Rate (beats per min)",
+#        y = "Heart Disease",
+#        title = "Relationship between HeartDisease and MaxHR, faceted by ST_Slope") +
+#   theme_bw(base_size = 9)
+
+p3_1 <- heart |>
+  mutate(MaxHR = cut_interval(MaxHR, n = 3)) |>
+  ggplot(aes(x = MaxHR, fill = HeartDisease)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = label_percent()) +
+  facet_grid(~ST_Slope) +
+  labs(x = "Bin of maximum Heart Rate (beats per min)",
+       y = "Percentage",
+       fill = "Heart Disease",
+       title = "Relationship between HeartDisease and MaxHR, faceted by ST_Slope") +
+  theme_bw(base_size = 9)
+
+p3_1
+```
+
+There are also potential interaction effects between predictor variables. An example is the interaction effect between maximum heart rate and the slope of the peak exercise ST segment. To produce the figure shown above, `MaxHR` was temporarily discretized into 3 bins; for later model analysis, it will still be used as a numeric predictor. As shown in the figure, there are significantly greater differences in the proportion of patients with heart diseases between the smallest and largest `MaxHR` bins for those with downward-sloping ST segments ($90.0\% - 50.0\% = 40.0\%$) and those with flat ST segments ($93.9\% - 60.3\% = 33.6\%$), compared to patients with upward-sloping ST segments ($25.0\% - 16.1\% = 8.9\%$). This suggests that the association between maximum heart rate and heart disease diagnosis differs with respect to ST Slope. We are motivated to explore similar interaction effects between predictors when modeling as well.
+
+## Methodology
+
+#### Type of Model and Predictor variables Considered
+
+In regards to our regression model technique, we plan on using logistic regression. Specifically, our logistic model will be in the form of $p = 1/(1+e^{-x})$ where x represents a regression equation with multiple variables and their corresponding coefficients. After using our data to find the suitable coefficients for our regression equation with multiple variables, this can then be substituted into our logistic model to find a value between 0 and 1 for $p$, where $p$ represents a "probability" or a "score" for having a true heart disease diagnosis. For example, we plan on potentially using a threshold of 0.5 for $p$, where $p$ greater than or equal to 0.5 signifies a prediction of 1 that indicates a patient has heart disease. Likewise, a value for $p$ that is less than 0.5 indicates a prediction of 0 that a patient does not have heart disease. In the end, our logistic regression model will be able to predict, even for new data, if a patient has heart disease based on a collection of the predictor variables listed above that make it into our final model.
+
+To make the final decision of whether logistic regression is proper for analyzing our dataset, we check the model conditions for logistic regression:
+
+-   **Linearity:** The linearity condition is satisfied. As demonstrated in the plots below for our quantitative predictors of Age and Maximum Heart Rate, they both have a linear relationship with the empirical logit.
+
+    ```{r emplogit-plot}
+    #| fig-height: 2
+
+    heart_emplogit <- function(col, n=10) {
+      heart |>
+        mutate(col_bin = cut_interval({{col}}, n = n)) |>
+        group_by(col_bin) |>
+        mutate(mean_col = mean({{col}})) |>
+        count(mean_col, HeartDisease) |>
+        mutate(prop = n/sum(n)) |>
+        filter(HeartDisease == 1) |>
+        mutate(emp_logit = log(prop/(1-prop))) |>
+        ggplot(aes(x = mean_col, y = emp_logit)) +
+        geom_point() +
+        geom_smooth(method = "lm", se = FALSE) +
+        labs(
+          x = substitute(col),
+          y = "Empirical logit",
+          title = paste("Empirical logit plot for", substitute(col))
+        ) +
+        theme_bw(base_size = 9)
+    }
+    p4_1 <- heart_emplogit(Age)
+    p4_2 <- heart_emplogit(MaxHR)
+    p4_1 + p4_2
+    ```
+
+-   **Randomness:** The randomness condition is satisfied. We do not have reason to believe that the participants of this study have a systematic difference from individuals in their general country populations when it comes to their personal health characteristics and their likelihood of having a heart disease.
+
+-   **Independence:** The independence condition is satisfied. It is reasonable to conclude that the subjects' health characteristics and the conducted testing are all independent of one another.
+
+Since all three conditions are satisfied, we can reasonably confirm that it is suitable to analyze our dataset with the logistic regression model.
+
+As for the predictor variables we plan on considering for our model, we want to analyze the influence of the collection of variables as stated in the Data Description section above, which includes both quantitative and categorical predictors. The potential quantitative predictors are age, resting blood pressure, and maximum heart rate achieved; Potential categorical predictors are sex, chest pain type, fasting blood sugar, resting ECG results, exercise induced angina, ST slope, and old peak intervals. Along with these initial predictors, we are interested in looking into interaction terms that can allow us to create a better model for heart disease. After we identify the main terms to include in the model, we investigate interaction terms between the selected main terms that stand out to us. Specific interaction terms that we consider include ST_Slope and MaxHR, ChestPainType and Sex, MaxHR and Sex, as well as Oldpeak and ST_Slope, which we will explain in detail in the Modeling Process section below.
+
+#### Modeling Process
+
+First, we transform the dataset and variables based on our EDA. We mean center the numerical predictors RestingBP and MaxHR to make the interpretation more meaningful. We also re-level categorical variables Oldpeak (from interval representing smallest to interval representing largest values), ST_Slope (set the baseline to be "Up"), ChestPainType (set the baseline to be "ASY", which represents no chest pain), and RestingECG (set the baseline to "Normal") to improve the interpretability of the results. As a note, we transform the dataset and at the same time create a corresponding recipe for the variable transformation process so that the procedure can be easily transferred to other datasets.
+
+We then split our transformed dataset into training set (75%) and testing set (25%). This helps us to evaluate the performance and generalizability of our model and prevent overfitting.
+
+```{r variable-transformation}
+heart_transform <- heart |>
+  subset(select = -Cholesterol) |>
+  mutate(
+    RestingBP = if_else(is.na(RestingBP), mean(RestingBP, na.rm = TRUE), RestingBP),
+    RestingBP = RestingBP - mean(RestingBP),
+    MaxHR = MaxHR - mean(MaxHR),
+    Oldpeak = case_when(
+      abs(Oldpeak) == 0 ~ "0",
+      abs(Oldpeak) <= 1 ~ "(0, 1]",
+      abs(Oldpeak) <= 2 ~ "(1, 2]",
+      abs(Oldpeak) > 2 ~ "(2, 6.2]"
+    ) |>
+      fct_relevel("0", "(0, 1]", "(1, 2]", "(2, 6.2]"),
+    
+    ST_Slope = fct_relevel(ST_Slope, "Up"),
+    ChestPainType = fct_relevel(ChestPainType, "ASY"),
+    RestingECG = fct_relevel(RestingECG, "Normal")
+  )
+```
+
+```{r split-data}
+
+set.seed(210)
+heart_split <- initial_split(heart_transform)
+heart_train <- training(heart_split)
+heart_test  <- testing(heart_split)
+```
+
+```{r recipe}
+heart_rec <- recipe(HeartDisease ~ ., data = heart_train) |>
+  step_mutate(
+    Oldpeak = abs(Oldpeak),
+    Oldpeak = case_when(
+      abs(Oldpeak) == 0 ~ "0",
+      abs(Oldpeak) <= 1 ~ "(0, 1]",
+      abs(Oldpeak) <= 2 ~ "(1, 2]",
+      abs(Oldpeak) > 2 ~ "(2, 6.2]"
+    )
+  ) |>
+  step_impute_mean(RestingBP) |>
+  step_center(all_numeric_predictors()) |>
+  step_relevel(ST_Slope, ref_level = "Up") |>
+  step_relevel(ChestPainType, ref_level = "ASY") |>
+  step_relevel(Oldpeak, ref_level = "0") |>
+  step_relevel(RestingECG, ref_level = "Normal") |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors())
+```
+
+Next, we conduct model selection in two main steps. We first consider only the main effects; We then identify interaction terms that stand out to us based on the resulting main terms in the model, employ drop-in-deviance tests to assess the significance of adding each term to the model, and incorporate the ones that have significant effects to the model.
+
+-   **Main Effects:** To select the optimal model considering only the main effects, we conduct forward and backward selection using the AIC as the standard. While forward and backward selection should theoretically give similar results, we decide to conduct both and compare the two models to account for potential differences within the two approaches or due to how R operates. We chose to use AIC for evaluating our model because it allows us to balance the model's accuracy with complexity. Specifically, AIC is an estimator of prediction error and relative quality of models that can support us to select the model that best predict Heart Disease in the context of our study. Compared to other possible estimators, we choose AIC as the main selection criteria since it strikes for a balance between underfitting and overfitting that is consistent with our Research goal. Specifically, AIC penalizes excessive complexity with terms in our model, which is crucial in the context of our study as overfitting can lead to misleading predictions. At the same time, since our research question asks for significant predictors of the occurrence of heart diseases, parsimony is not our highest priority in modeling. AIC is thus more ideal than BIC in this context. In general, through achieving a quite parsimonious model with lower AIC, our goal is to obtain a final model that captures the essential relationships between the predictor variables and the likelihood of having heart disease, which will allow us to increase generalizability to new, unseen patient data.
+
+    The output of the forward selection and backward selection process is shown in Appendix 1. Comparing the output, we find the two approaches resulting in the same model, coefficients, and AIC value (471.4). The VIF values of the model are small (See Appendix 3), indicating no major issue of multicollinearity and ensuring interpretability. This motivates us to adopt this model as the final model considering only main terms. Therefore, the main terms we include are ST_Slope, ChestPainType, Sex, FastingBS, ExerciseAngina, Oldpeak, and MaxHR. The final model considering only main terms is displayed below:
+
+    ```{r main-model-fit}
+    final_main_model <- logistic_reg() |>
+      set_engine("glm") |>
+      fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR, data = heart_train, family = "binomial")
+
+    tidy(final_main_model) |> 
+      kable(digits = 3)
+    ```
+
+-   **Interaction terms:** As we examine potential interactions between the predictor variables in the model above, the followings stand out to us based on the context of the data: **a).** ST_Slope and MaxHR (as explored in EDA) **b).** ChestPainType and Sex (Our intuitive and research suggests that the syndromes and effects of different chest pain types may vary across male and female. We would like to explore if the effect of ChestPainType in predicting heart disease would differ based on Sex.); **c).** MaxHR and Sex (The ranges of "normal" heart rate tend to differ between males and females in our daily lives. Thus, the intuition is that effect of maximum heart rate on the log-odds of having heart disease might be affected by sex, which we would like to explore.); **d).** Oldpeak and ST_Slope (Oldpeak and ST_Slope describe the extent of exercise-induced ST depression (deviation from the baseline) and the slope of the ST segment, respectively. Both are indicators of cardiac stress during physical activity. We would like to explore whether certain combinations of the magnitude (Oldpeak) and trend (ST_Slope) lead to higher odds of having heart disease.)
+
+    We use the drop-in-deviance tests to assess the significance of adding each term to the model. We choose drop-in-deviance tests since they can compare nested models and assess whether the more complex model has a significant improvement in performance compared to the simpler model, thus supporting us to select interaction terms to add into the model in consistent with our research goal. We start by comparing our final model with only main terms to that model with an interaction term added. We then update (or keep) our final model based on the results of the tests, and compare it to that model with another interaction term added, until we conduct tests on all interaction terms we are interested in. Specifically, if p-value \< 0.05, which indicates that the data provide sufficient evidence that the coefficient of the term is not equal to 0, we add the term to the model; On the other hand, if p-value \> 0.05, we do not add the term.
+
+    We start by comparing the final model considering only main effects to the same model adding terms for interaction between a). ST_Slope and MaxHR. Since the p-value is around 0.015, smaller than 0.05, we add the interaction term to the model. The output is displayed below:
+
+    ```{r interaction-model-1}
+    # ST_Slope * ChestPainType = 0.007
+    # ST_Slope * MaxHR = 0.01
+    # ChestPainType * MaxHR = 0.03
+    # Oldpeak * MaxHR = 0.01
+
+    # ST_Slope * MaxHR
+    model_interaction1 <- logistic_reg() |>
+      set_engine("glm") |>
+      fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR, data = heart_train, family = "binomial")
+
+    anova(final_main_model$fit, model_interaction1$fit, test = "Chisq") |>
+      tidy()
+    ```
+
+    This new model with interaction terms is then used as the baseline model to be compared with in the drop-in-deviance tests. Since the p-value for b) ChestPainType and Sex and c) MaxHR and Sex are larger than 0.05, we end up not including these terms. The p-value when adding interaction terms for d) Oldpeak and ST_Slope is approximately 0 (much smaller than 0.05), so we add these interaction terms to our model. The output for b) ChestPainType and Sex and d) Oldpeak and ST_Slope is displayed below, repsectively. See Appendix 2 for output of c) MaxHR and Sex.
+
+    ```{r interaction-model-2}
+
+    # ChestPainType vs. Sex
+    model_interaction2 <- logistic_reg() |>
+      set_engine("glm") |>
+      fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + ChestPainType * Sex, data = heart_train, family = "binomial")
+
+    anova(model_interaction1$fit, model_interaction2$fit, test = "Chisq") |>
+      tidy()
+    ```
+
+    ```{r interaction-model-4}
+
+    # Oldpeak and ST_Slope
+    model_interaction4 <- logistic_reg() |>
+      set_engine("glm") |>
+      fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + Oldpeak * ST_Slope, data = heart_train, family = "binomial")
+
+    anova(model_interaction1$fit, model_interaction4$fit, test = "Chisq") |>
+      tidy()
+    ```
+
+    Thus, we end up adding the interaction effects of ST_Slope and MaxHR, along with Oldpeak and ST_Slope. The output for this final model is shown below:
+
+    ```{r final-model-fit-with-interaction}
+
+    final_model_withInteraction <- logistic_reg() |>
+      set_engine("glm") |>
+      fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + Oldpeak * ST_Slope, data = heart_train, family = "binomial")
+
+    tidy(final_model_withInteraction) |> 
+      kable(digits = 3)
+    ```
+
+We observe that the deviance of a few terms (one level for Oldpeak and two levels for interaction between ST_Slope and Oldpeak) are unusually high. This may indicate potential multicollinearity issues. To prevent potential multicollinearity issue, we further calculate the VIF (See output in Appendix 3), which is consistent with the unusual deviance. Specifically, the VIF values for Oldpeak (2, 6.2\], ST_SlopeDown:Oldpeak(2, 6.2\] and ST_SlopeFlat:Oldpeak(2, 6.2\] exceeds $10^6$ (a million), indicating the existence of strong multicollinearity between Oldpeak and the interaction terms for ST_Slope and Oldpeak. To ensure reliability and interpretability, we decide to drop the interaction terms for ST_Slope and Oldpeak. The VIF values for the updated final model (see Appendix 3) are all smaller than 2, thus no longer implying potential multicollinearity issues. This will be our final model.
+
+Lastly, we update the recipe and construct the workflow based on the result above, fit the final model based on the training set, and evaluate the performance of the model based on the training set. We display the final model in the Result section. We use the ROC curve and AUC to evaluate the model performance on the training set, the result displaying below.
+
+```{r train_roc1, out.width = '50%' }
+#Final recipe
+heart_rec_final <- recipe(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR, data = heart_train) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_interact(terms = ~starts_with("ST_Slope"):MaxHR) |>
+  step_zv()
+
+#Fit model using recipe
+heart_spec <- logistic_reg() |>
+  set_engine("glm")
+
+heart_wflow <- workflow() |>
+  add_model(heart_spec) |>
+  add_recipe(heart_rec_final)
+
+heart_fit <- heart_wflow |>
+  fit(data = heart_train)
+
+#ROC AUC
+heart_train_pred <- predict(heart_fit, heart_train, type = "prob") |>
+  bind_cols(heart_train)
+
+train_roc1 <- heart_train_pred |>
+  roc_curve(
+    truth = HeartDisease,
+    .pred_1,
+    event_level = "second"
+  ) |> autoplot()
+
+heart_train_pred |>
+  roc_auc(
+    truth = HeartDisease,
+    .pred_1,
+    event_level = "second"
+  )
+
+train_roc1
+```
+
+The ROC curve is quite close to the upper left corner of the graph and the AUC value is approximately 0.94, both of which indicate that our final model fits the data quite well. We will further evaluate the model using the testing set in the result section for further conclusion of model performance.
+
+## Results
+
+#### Final model output:
+
+```{r final-model-fit}
+# tidy(heart_fit) |>
+#   kable(digits = 3)
+
+tidy(heart_fit, conf.int = TRUE) |>
+  kable(digits = 3)
+```
+
+Given our model meet the conditions for inference, we can interpret the final output to investigate the statistically significant (p-value \< 0.05) predictors of heart disease in patients.
+
+The odds of having heart disease for patients with a down ST slope are expected to be `r round(exp(1.041),3)` times the odds of patients with an up ST slope, holding all else constant. The odds of having heart disease for patients with a flat ST slope are expected to be `r round(exp(2.605),3)` times the odds of patients with an up ST slope, holding all else constant. The odds of having heart disease for patients who are the male sex are expected to be `r round(exp(1.665),3)` times the odds of patients who are the female sex, holding all else constant. The odds of having heart disease for patients with a fasting blood sugar greater than 120 mg/dL are expected to be `r round(exp(1.523),3)` times the odds of patients who do not, holding all else constant. The odds of having heart disease for patients with a exercise-induced angina are expected to be `r round(exp(1.096),3)` times the odds of patients without exercise-induced angina, holding all else constant. The odds of having heart disease for patients with a ST depression induced by exercise relative to rest where the absolute value of the deviation of the ST segments from the baseline is 2 to 6.2 mm is expected to be `r round(exp(1.407),3)` times the odds of patients with an ST depression induced by exercise relative to rest of 0 mm, holding all else constant.
+
+By looking at the final model output, predictors that are statistically significant (p-value \< 0.05) that increase the odds of heart disease are a flat ST slope, down ST slope, an asymptomatic chest pain type, being of the male sex, fasting blood sugar greater than 120 mg/dL, having exercise-induced angina, and a ST depression induced by exercise relative to rest where the absolute value of the deviation of the ST segments from the baseline is 2 to 6.2 mm.
+
+#### Testing our model on testing data:
+
+```{r test_roc1, out.width = '40%'}
+heart_test_pred <- predict(heart_fit, heart_test, type = "prob") |>
+  bind_cols(heart_test)
+
+test_roc1 <- heart_test_pred |>
+  roc_curve(
+    truth = HeartDisease,
+    .pred_1,
+    event_level = "second"
+  ) |> autoplot()
+
+ heart_test_pred |>
+  roc_auc(
+    truth = HeartDisease,
+    .pred_1,
+    event_level = "second"
+  )
+
+ test_roc1
+```
+
+Using the testing data set, the ROC curve is still quite close to the upper left corner of the graph and the AUC value is approximately 0.92, both of which indicate that our final model fits new data quite well and maintains a high accuracy of predicting heart disease.
+
+To further evaluate our model, we created a confusion matrix with a cutoff probability of 0.25. We choose a cut-off probability of 0.25 because we seek to prioritize sensitivity. Since our model is predicting whether a patient has heart disease, we want to minimize our false negative rate, because predicting a patient doesn't have heart disease when they do is more dangerous than predicting a patient has heart disease when they don't.
+
+```{r test-pred}
+cutoff_prob <- 0.25
+confusion_matrix <- heart_test_pred |>
+  mutate(
+    heart_test_pred = as_factor(if_else(.pred_1 >= cutoff_prob, 1, 0)),
+    HeartDisease      = if_else(HeartDisease == 1, "Has heart disease", "Does not have heart disease"),
+    heart_test_pred = if_else(heart_test_pred == 1, "Classified as heart disease", "Not classified as heart disease")
+    ) |>
+  count(heart_test_pred, HeartDisease) |>
+  pivot_wider(names_from = HeartDisease, values_from = n)
+confusion_matrix |>
+  kable(col.names = c("", "Does not have heart disease", "Has heart disease"))
+```
+
+```{r}
+TP <- confusion_matrix$`Has heart disease`[1]
+FP <- confusion_matrix$`Does not have heart disease`[1]
+FN <- confusion_matrix$`Has heart disease`[2]
+TN <- confusion_matrix$`Does not have heart disease`[2]
+
+FNR = FN/(TP + FN)
+
+FPR = FP/(FP + TN)
+
+Sens = 1 - FNR
+
+Spec = 1 - FPR
+
+Acc = (TP + TN)/(TP + TN + FP + FN)
+```
+
+In our final model, the false negative rate is `r round(FNR*100, 2)` % and the false positive rate is `r round(FPR*100, 2)` %. The final model's sensitivity rate is `r round(Sens*100, 2)` % and the specificity rate is `r round(Spec*100, 2)` %. Additionally, the final accuracy produced by the model was `r round(Acc*100, 2)`%. Based on these metrics, we can conclude our final model is a strong predictor of whether a patient has heart disease.
+
+An interesting find in our model is how an asymptomatic chest pain type in a statistically significant predictor of heart disease, holding all else constant. This finding coincides with the phenomenon of being asymptomatic, particularly in terms of chest pain, yet still having heart disease or a heart attack. This shows that extreme chest pain is not a definitive sign of heart disease.
+
+## Discussion + Conclusion
+
+#### Summary of our findings:
+
+When looking at our results on the testing data, our model produced an extremely high sensitivity at `r round(Sens*100, 2)` % along with a relatively high specificity at `r round(Spec*100, 2)` %---furthermore, the model produced a high accuracy of `r round(Acc*100, 2)`%. In the context of our data, it is imperative for our model to be able to predict that one has heart disease with the information that they do truly have heart disease because of the value of human life, therefore indicating our preference to prioritize sensitivity. While maximizing specificity is not as crucial compared to sensitivity in this situation, our outputs for these rates and our accuracy rate indicate that our model is relatively reliable for predicting the occurrence of heart disease and that there is still room for improvement.
+
+In regards to our research question in finding the best predictors for heart disease, our methodology in utilizing AIC as a performance metric along with drop-in-deviance tests for interaction terms allowed us to hone in on the optimal predictors we sought after. More specifically, our final model includes the following statistically significant (p-value \< 0.05) predictors that increase the odds of heart disease: a flat and down ST slope, has an asymptomatic chest pain type, male sex, fasting blood sugar \> 120 mg/dL, has exercise-induced angina, has an ST depression induced by exercise relative to rest where the absolute value of the deviation of the ST segments from the baseline is 2 to 6.2 mm (full model in Results output). We can conclude that patients that have these statistically significant characteristics, are more likely to have heart disease than those who do not. Thus, in relation to our research question, our significant predictors of an occurrence of heart disease are these statistically significant characteristics. This is vital in the context of the real world, as it indicates how cardiologists and patients should focus on analyzing these characteristics to both diagnose and mitigate the likelihood of heart disease occurring.
+
+Lastly, as we saw with our AUC value of 0.92, we can see that our final model fits our testing data quite well. This indicates that our model with the aforementioned predictors is likely to perform well on new, unseen data in the real world for predicting heart disease in patients where all these characteristics (especially those concluded to be statistically significant) are collected.
+
+#### Limitations of our data/analysis and ideas for future work:
+
+During our analysis, we ran into several limitations that pertain to our data and our analysis. In regards to data, we were not provided a location-specific variable for each observation. Our data set was curated by combining patient data from several locations, thus it is possible for location to potential affect the model, but we had no means of evaluating this. Likewise, while we did justify that serial correlation is not a problem and that all individual subjects' health characteristics were independent of one another, it would have been useful to have data related to the date of a patient observation to conduct further analysis on this condition or even for our model (i.e. evaluating if a time period has an influence on heart disease occurrence).
+
+Meanwhile, in regards to our analysis, one limitation we encountered was our time limitation to utilize other performance metrics aside from AIC. Despite thoroughly using AIC as an evaluation benchmark, it may have been interesting to consider other metrics (i.e. BIC or even allowing for more complexity) to see if there is a more optimal model or if our model is corroborated by other metrics. Furthermore, we had a limitation on time to check every possible interaction term that may be incorporated in our model. Our methodology consisted of testing interaction terms that made intuitive sense to have some sort of relationship, but it is possible that we missed certain interaction terms that could have increased the efficiency of our model.
+
+Lastly, we did not encounter much of an issue regarding the reliability and validity of our data, especially given the source of this data set. Our statistical analysis has highly appropriate applications to the real world, especially with the ultimate goal in determining the best possible predictors that allow for one to determine if a patient has heart disease.
+
+Therefore, our ideas for future work would be to address some of our limitations, especially those related to analysis. With more time on this project, we would test more interaction terms and perform corresponding drop-in-deviance tests to get a holistic idea of all possible interaction terms that could optimize the model. Furthermore, we would use another fit evaluation metric such as BIC to see how the best BIC model compares to our model evaluated with AIC. In the event of a new, optimal model using BIC, it is possible we discover further predictors that are crucial for cardiologists in predicting heart disease.
+
+\newpage
+
+## Appendix
+
+#### **Appendix 1:** **Output of forward and backward selection**
+
+The output of the forward selection process:
+
+```{r forward-selection}
+#| include: FALSE
+# initial model
+# Using AIC as the standard here
+initial_fw_model <- glm(HeartDisease ~ 1, data = heart_train, family = "binomial")
+
+# forward selection
+final_fw_model <- stepAIC(initial_fw_model,  scope = ~ Age + Sex + ChestPainType + RestingBP + FastingBS + RestingECG + MaxHR + ExerciseAngina + Oldpeak + ST_Slope, direction = "forward")
+```
+
+```{r forward-selection-output}
+summary(final_fw_model)
+```
+
+The output of the backward selection process:
+
+```{r backward-selection}
+#| include: FALSE
+# initial model
+# Using AIC as the standard here 
+initial_bw_model <- glm(HeartDisease ~ ., data = heart_train, family = "binomial")
+
+# backward selection
+final_bw_model <- stepAIC(initial_bw_model, direction = "backward")
+```
+
+```{r backward-selection-output}
+summary(final_bw_model)
+```
+
+#### **Appendix 2: Output for selecting interaction terms using drop-in-deviance tests**
+
+**b).** MaxHR and Sex
+
+```{r interaction-model-3}
+
+# Max HR vs. Sex
+model_interaction3 <- logistic_reg() |>
+  set_engine("glm") |>
+  fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + MaxHR * Sex, data = heart_train, family = "binomial")
+
+anova(model_interaction1$fit, model_interaction3$fit, test = "Chisq") |>
+  tidy()
+```
+
+#### **Appendix 3: VIF values for each candidate model**
+
+**a).** The final main effects model
+
+```{r}
+vif(final_main_model$fit)
+```
+
+**b).** The model with the two interaction terms (interactions between ST_Slope and MaxHR and interactions between ST_Slope and Oldpeak)
+
+```{r}
+vif(final_model_withInteraction$fit)
+```
+
+**c).** The final model (after dropping the interaction between ST_Slope and Oldpeak)
+
+```{r}
+final_model_0 <- logistic_reg() |>
+  set_engine("glm") |>
+  fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR, data = heart_train, family = "binomial")
+
+vif(final_model_0$fit)
+```
+
+#### **Appendix 4: References**
+
+Benjamin, Emelia, et al. "Heart disease and stroke statistics---2018 update: A report from the American Heart Association." *Circulation*, vol. 137, no. 12, 2018, https://doi.org/10.1161/cir.0000000000000558.
+
+"Cardiovascular Diseases (Cvds)." *World Health Organization*, World Health Organization, www.who.int/news-room/fact-sheets/detail/cardiovascular-diseases-(cvds). Accessed 1 Dec. 2023. 
+
+Detrano, Robert, et al. "International application of a new probability algorithm for the diagnosis of coronary artery disease." *The American Journal of Cardiology*, vol. 64, no. 5, 1989, pp. 304--310, https://doi.org/10.1016/0002-9149(89)90524-9.
+
+Lopez, Edgardo, et al. "Cardiovascular Disease." *StatPearls*, updated 22 Aug. 2023, StatPearls Publishing, 2023 Jan. Web. Available from: https://www.ncbi.nlm.nih.gov/books/NBK535419/
