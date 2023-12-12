@@ -51,7 +51,7 @@ The codebook for all variables' definitions can be found in [the README file](./
 -   `FastingBS`: Whether the patient has high fasting blood sugar (1: if fasting blood sugar \> 120 mg/dL; 0: otherwise)
 -   `RestingECG`: Resting electrocardiogram results (Normal: Normal; ST: having ST-T wave abnormality; LVH: showing probable or definite left ventricular hypertrophy by Estes' criteria)
 -   `MaxHR`: Maximum heart rate achieved (numeric value in times per minute)
--   `ExerciseAngima`: Whether the patient experiences exercise-induced angina (Y: Yes; N: No)
+-   `ExerciseAngina`: Whether the patient experiences exercise-induced angina (Y: Yes; N: No)
 -   `Oldpeak`: ST depression induced by exercise relative to rest (numeric value in mm)
 -   `ST_Slope`: Slope of the peak exercise ST segment (Up: up-sloping; Flat: flat; Down: down-sloping)
 
@@ -182,34 +182,7 @@ In regards to our regression model technique, we plan on using logistic regressi
 
 To make the final decision of whether logistic regression is proper for analyzing our dataset, we check the model conditions for logistic regression:
 
--   **Linearity:** The linearity condition is satisfied. As demonstrated in the plots below for our quantitative predictors of Age and Maximum Heart Rate, they both have a linear relationship with the empirical logit.
-
-    ```{r emplogit-plot}
-    #| fig-height: 2
-
-    heart_emplogit <- function(col, n=10) {
-      heart |>
-        mutate(col_bin = cut_interval({{col}}, n = n)) |>
-        group_by(col_bin) |>
-        mutate(mean_col = mean({{col}})) |>
-        count(mean_col, HeartDisease) |>
-        mutate(prop = n/sum(n)) |>
-        filter(HeartDisease == 1) |>
-        mutate(emp_logit = log(prop/(1-prop))) |>
-        ggplot(aes(x = mean_col, y = emp_logit)) +
-        geom_point() +
-        geom_smooth(method = "lm", se = FALSE) +
-        labs(
-          x = substitute(col),
-          y = "Empirical logit",
-          title = paste("Empirical logit plot for", substitute(col))
-        ) +
-        theme_bw(base_size = 9)
-    }
-    p4_1 <- heart_emplogit(Age)
-    p4_2 <- heart_emplogit(MaxHR)
-    p4_1 + p4_2
-    ```
+-   **Linearity:** The linearity condition is satisfied. As demonstrated in the plots for our quantitative predictors of Age and Maximum Heart Rate (see Appendix 5 for the empirical logit plots), they both have a linear relationship with the empirical logit.
 
 -   **Randomness:** The randomness condition is satisfied. We do not have reason to believe that the participants of this study have a systematic difference from individuals in their general country populations when it comes to their personal health characteristics and their likelihood of having a heart disease.
 
@@ -277,7 +250,7 @@ heart_rec <- recipe(HeartDisease ~ ., data = heart_train) |>
 
 Next, we conduct model selection in two main steps. We first consider only the main effects; We then identify interaction terms that stand out to us based on the resulting main terms in the model, employ drop-in-deviance tests to assess the significance of adding each term to the model, and incorporate the ones that have significant effects to the model.
 
--   **Main Effects:** To select the optimal model considering only the main effects, we conduct forward and backward selection using the AIC as the standard. While forward and backward selection should theoretically give similar results, we decide to conduct both and compare the two models to account for potential differences within the two approaches or due to how R operates. We chose to use AIC for evaluating our model because it allows us to balance the model's accuracy with complexity. Specifically, AIC is an estimator of prediction error and relative quality of models that can support us to select the model that best predict Heart Disease in the context of our study. Compared to other possible estimators, we choose AIC as the main selection criteria since it strikes for a balance between underfitting and overfitting that is consistent with our Research goal. Specifically, AIC penalizes excessive complexity with terms in our model, which is crucial in the context of our study as overfitting can lead to misleading predictions. At the same time, since our research question asks for significant predictors of the occurrence of heart diseases, parsimony is not our highest priority in modeling. AIC is thus more ideal than BIC in this context. In general, through achieving a quite parsimonious model with lower AIC, our goal is to obtain a final model that captures the essential relationships between the predictor variables and the likelihood of having heart disease, which will allow us to increase generalizability to new, unseen patient data.
+-   **Main Effects:** To select the optimal model considering only the main effects, we conduct forward and backward selection using the AIC as the standard. We choose to use the stepwise selection procedures, specifically the stepAIC method in R, since we want to effectively obtain the model that optimally predict the response variable HeartDisease (in our case, the model with the lowest AIC value) among all potential models given the 10 potential predictors. While forward and backward selection should theoretically give similar results, we decide to conduct both and compare the two models to account for potential differences within the two approaches or due to how R operates. We choose to use AIC for evaluating our model because it allows us to balance the model's accuracy with complexity. Specifically, AIC is an estimator of prediction error and relative quality of models that can support us to select the model that best predict Heart Disease in the context of our study. Compared to other possible estimators, we choose AIC as the main selection criteria since it strikes for a balance between underfitting and overfitting that is consistent with our Research goal. Specifically, AIC penalizes excessive complexity with terms in our model, which is crucial in the context of our study as overfitting can lead to misleading predictions. At the same time, since our research question asks for significant predictors of the occurrence of heart diseases, parsimony is not our highest priority in modeling. AIC is thus more ideal than BIC in this context. In general, through achieving a quite parsimonious model with lower AIC, our goal is to obtain a final model that captures the essential relationships between the predictor variables and the likelihood of having heart disease, which will allow us to increase generalizability to new, unseen patient data.
 
     The output of the forward selection and backward selection process is shown in Appendix 1. Comparing the output, we find the two approaches resulting in the same model, coefficients, and AIC value (471.4). The VIF values of the model are small (See Appendix 3), indicating no major issue of multicollinearity and ensuring interpretability. This motivates us to adopt this model as the final model considering only main terms. Therefore, the main terms we include are ST_Slope, ChestPainType, Sex, FastingBS, ExerciseAngina, Oldpeak, and MaxHR. The final model considering only main terms is displayed below:
 
@@ -308,7 +281,8 @@ Next, we conduct model selection in two main steps. We first consider only the m
       fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR, data = heart_train, family = "binomial")
 
     anova(final_main_model$fit, model_interaction1$fit, test = "Chisq") |>
-      tidy()
+      tidy() |>
+      kable(digits = 3, col.names = c("term", "df.resid", "resid.devi", " df","devi","p-val"), align = "c") 
     ```
 
     This new model with interaction terms is then used as the baseline model to be compared with in the drop-in-deviance tests. Since the p-value for b) ChestPainType and Sex and c) MaxHR and Sex are larger than 0.05, we end up not including these terms. The p-value when adding interaction terms for d) Oldpeak and ST_Slope is approximately 0 (much smaller than 0.05), so we add these interaction terms to our model. The output for b) ChestPainType and Sex and d) Oldpeak and ST_Slope is displayed below, repsectively. See Appendix 2 for output of c) MaxHR and Sex.
@@ -321,7 +295,8 @@ Next, we conduct model selection in two main steps. We first consider only the m
       fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + ChestPainType * Sex, data = heart_train, family = "binomial")
 
     anova(model_interaction1$fit, model_interaction2$fit, test = "Chisq") |>
-      tidy()
+      tidy() |>
+      kable(digits = 3, col.names = c("term", "df.resid", "resid.devi", " df","devi","p-val"), align = "c") 
     ```
 
     ```{r interaction-model-4}
@@ -332,7 +307,8 @@ Next, we conduct model selection in two main steps. We first consider only the m
       fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + Oldpeak * ST_Slope, data = heart_train, family = "binomial")
 
     anova(model_interaction1$fit, model_interaction4$fit, test = "Chisq") |>
-      tidy()
+      tidy() |>
+      kable(digits = 3, col.names = c("term", "df.resid", "resid.devi", " df","devi","p-val"), align = "c") 
     ```
 
     Thus, we end up adding the interaction effects of ST_Slope and MaxHR, along with Oldpeak and ST_Slope. The output for this final model is shown below:
@@ -349,9 +325,9 @@ Next, we conduct model selection in two main steps. We first consider only the m
 
 We observe that the deviance of a few terms (one level for Oldpeak and two levels for interaction between ST_Slope and Oldpeak) are unusually high. This may indicate potential multicollinearity issues. To prevent potential multicollinearity issue, we further calculate the VIF (See output in Appendix 3), which is consistent with the unusual deviance. Specifically, the VIF values for Oldpeak (2, 6.2\], ST_SlopeDown:Oldpeak(2, 6.2\] and ST_SlopeFlat:Oldpeak(2, 6.2\] exceeds $10^6$ (a million), indicating the existence of strong multicollinearity between Oldpeak and the interaction terms for ST_Slope and Oldpeak. To ensure reliability and interpretability, we decide to drop the interaction terms for ST_Slope and Oldpeak. The VIF values for the updated final model (see Appendix 3) are all smaller than 2, thus no longer implying potential multicollinearity issues. This will be our final model.
 
-Lastly, we update the recipe and construct the workflow based on the result above, fit the final model based on the training set, and evaluate the performance of the model based on the training set. We display the final model in the Result section. We use the ROC curve and AUC to evaluate the model performance on the training set, the result displaying below.
+Lastly, we update the recipe and construct the workflow based on the result above, fit the final model based on the training set, and evaluate the performance of the model based on the training set. We display the final model in the Result section. We use the ROC curve and AUC to evaluate the model performance on the training set, the results displaying below.
 
-```{r train_roc1, out.width = '50%' }
+```{r train_roc1, fig.align='center', out.width = '50%' }
 #Final recipe
 heart_rec_final <- recipe(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR, data = heart_train) |>
   step_dummy(all_nominal_predictors()) |>
@@ -378,15 +354,21 @@ train_roc1 <- heart_train_pred |>
     truth = HeartDisease,
     .pred_1,
     event_level = "second"
-  ) |> autoplot()
+  ) |> 
+  autoplot()
 
 heart_train_pred |>
   roc_auc(
     truth = HeartDisease,
     .pred_1,
     event_level = "second"
-  )
+  ) |>
+  kable()
 
+```
+
+```{r plot-train-roc, fig.align='center', out.width = '50%'}
+#| fig-pos: 'h'
 train_roc1
 ```
 
@@ -412,7 +394,9 @@ By looking at the final model output, predictors that are statistically signific
 
 #### Testing our model on testing data:
 
-```{r test_roc1, out.width = '40%'}
+Using the testing data set, the ROC curve is still quite close to the upper left corner of the graph and the AUC value is approximately 0.92, both of which indicate that our final model fits new data quite well and maintains a high accuracy of predicting heart disease.
+
+```{r test_roc1, fig.align='center', out.width = '50%'}
 heart_test_pred <- predict(heart_fit, heart_test, type = "prob") |>
   bind_cols(heart_test)
 
@@ -421,19 +405,21 @@ test_roc1 <- heart_test_pred |>
     truth = HeartDisease,
     .pred_1,
     event_level = "second"
-  ) |> autoplot()
+  ) |> 
+  autoplot()
 
  heart_test_pred |>
   roc_auc(
     truth = HeartDisease,
     .pred_1,
     event_level = "second"
-  )
+  ) |>
+  kable()
 
  test_roc1
 ```
 
-Using the testing data set, the ROC curve is still quite close to the upper left corner of the graph and the AUC value is approximately 0.92, both of which indicate that our final model fits new data quite well and maintains a high accuracy of predicting heart disease.
+\pagebreak
 
 To further evaluate our model, we created a confusion matrix with a cutoff probability of 0.25. We choose a cut-off probability of 0.25 because we seek to prioritize sensitivity. Since our model is predicting whether a patient has heart disease, we want to minimize our false negative rate, because predicting a patient doesn't have heart disease when they do is more dangerous than predicting a patient has heart disease when they don't.
 
@@ -488,7 +474,7 @@ During our analysis, we ran into several limitations that pertain to our data an
 
 Meanwhile, in regards to our analysis, one limitation we encountered was our time limitation to utilize other performance metrics aside from AIC. Despite thoroughly using AIC as an evaluation benchmark, it may have been interesting to consider other metrics (i.e. BIC or even allowing for more complexity) to see if there is a more optimal model or if our model is corroborated by other metrics. Furthermore, we had a limitation on time to check every possible interaction term that may be incorporated in our model. Our methodology consisted of testing interaction terms that made intuitive sense to have some sort of relationship, but it is possible that we missed certain interaction terms that could have increased the efficiency of our model.
 
-Lastly, we did not encounter much of an issue regarding the reliability and validity of our data, especially given the source of this data set. Our statistical analysis has highly appropriate applications to the real world, especially with the ultimate goal in determining the best possible predictors that allow for one to determine if a patient has heart disease.
+Lastly, we did not encounter much of an issue regarding the reliability and validity of our data, especially given the source of this data set. Our statistical analysis has highly appropriate applications to the real world, especially with the ultimate goal in determining the best possible predictors that allow for one to determine if a patient has heart disease. However, we would like to point out a limitation regarding the application of our model and data in today's society. Given that the data was collected about 40 years ago, there is the possibility of predictors for heart disease to have changed in general, especially in regards to new technologies that are available, changes in foods that are regularly eaten, and other daily living practices that have become more commonplace. Thus, while we do believe that our conclusions on certain predictors could change with more recent data (something which we would like to investigate in future work), our model nonetheless still provides valuable insight on various predictors that need to be considered when checking for heart disease.
 
 Therefore, our ideas for future work would be to address some of our limitations, especially those related to analysis. With more time on this project, we would test more interaction terms and perform corresponding drop-in-deviance tests to get a holistic idea of all possible interaction terms that could optimize the model. Furthermore, we would use another fit evaluation metric such as BIC to see how the best BIC model compares to our model evaluated with AIC. In the event of a new, optimal model using BIC, it is possible we discover further predictors that are crucial for cardiologists in predicting heart disease.
 
@@ -542,7 +528,8 @@ model_interaction3 <- logistic_reg() |>
   fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR + MaxHR * Sex, data = heart_train, family = "binomial")
 
 anova(model_interaction1$fit, model_interaction3$fit, test = "Chisq") |>
-  tidy()
+  tidy() |>
+  kable(digits = 3, col.names = c("term", "df.resid", "resid.devi", " df","devi","p-val"), align = "c") 
 ```
 
 #### **Appendix 3: VIF values for each candidate model**
@@ -550,13 +537,15 @@ anova(model_interaction1$fit, model_interaction3$fit, test = "Chisq") |>
 **a).** The final main effects model
 
 ```{r}
-vif(final_main_model$fit)
+vif(final_main_model$fit) |>
+  kable(digits = 3, col.names = c("vif")) 
 ```
 
 **b).** The model with the two interaction terms (interactions between ST_Slope and MaxHR and interactions between ST_Slope and Oldpeak)
 
 ```{r}
-vif(final_model_withInteraction$fit)
+vif(final_model_withInteraction$fit) |>
+  kable(digits = 3, col.names = c("vif")) 
 ```
 
 **c).** The final model (after dropping the interaction between ST_Slope and Oldpeak)
@@ -566,7 +555,8 @@ final_model_0 <- logistic_reg() |>
   set_engine("glm") |>
   fit(HeartDisease ~ ST_Slope + ChestPainType + Sex + FastingBS + ExerciseAngina + Oldpeak + MaxHR + ST_Slope * MaxHR, data = heart_train, family = "binomial")
 
-vif(final_model_0$fit)
+vif(final_model_0$fit)|>
+  kable(digits = 3, col.names = c("vif")) 
 ```
 
 #### **Appendix 4: References**
@@ -578,3 +568,34 @@ Benjamin, Emelia, et al. "Heart disease and stroke statistics---2018 update: A r
 Detrano, Robert, et al. "International application of a new probability algorithm for the diagnosis of coronary artery disease." *The American Journal of Cardiology*, vol. 64, no. 5, 1989, pp. 304--310, https://doi.org/10.1016/0002-9149(89)90524-9.
 
 Lopez, Edgardo, et al. "Cardiovascular Disease." *StatPearls*, updated 22 Aug. 2023, StatPearls Publishing, 2023 Jan. Web. Available from: https://www.ncbi.nlm.nih.gov/books/NBK535419/
+
+#### **Appendix 5: Output of emplogit plots to check linearity condition**
+
+The output of the emplogit function:
+
+```{r emplogit-plot}
+#| fig-height: 2
+
+heart_emplogit <- function(col, n=10) {
+  heart |>
+    mutate(col_bin = cut_interval({{col}}, n = n)) |>
+    group_by(col_bin) |>
+    mutate(mean_col = mean({{col}})) |>
+    count(mean_col, HeartDisease) |>
+    mutate(prop = n/sum(n)) |>
+    filter(HeartDisease == 1) |>
+    mutate(emp_logit = log(prop/(1-prop))) |>
+    ggplot(aes(x = mean_col, y = emp_logit)) +
+    geom_point() +
+    geom_smooth(method = "lm", se = FALSE) +
+    labs(
+      x = substitute(col),
+      y = "Empirical logit",
+      title = paste("Empirical logit plot for", substitute(col))
+    ) +
+    theme_bw(base_size = 9)
+}
+p4_1 <- heart_emplogit(Age)
+p4_2 <- heart_emplogit(MaxHR)
+p4_1 + p4_2
+```
